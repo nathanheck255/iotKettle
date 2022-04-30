@@ -58,6 +58,11 @@ WiFiClientSecure wifi_client = WiFiClientSecure();
 MQTTClient mqtt_client = MQTTClient(256); //256 indicates the maximum size for packets being published and received.
 uint32_t t1;
 
+/* This function will take in a pointer to char array
+*  and print it to the OLED screen. We will use this
+*  to provide visual feedback on currently selected
+*  drink and it's target water temperature
+*/
 void testscrolltext(char * text) {
   display.clearDisplay();
   display.setCursor(0, 0);
@@ -148,6 +153,8 @@ void mqttconnect() {
   }
 }
 
+/* This function will check the target water temperature
+* and illuminate a number of LEDs depending on how hot it is */
 void ShowLEDs(unsigned int howHot){
   switch(howHot){
     case 1:
@@ -244,6 +251,9 @@ void ShowLEDs(unsigned int howHot){
   }
 }
 
+/* This function is an ISR that occurs every time a message is received over MQTT
+* If the message contains ON, OFF, or a number 1-8 the ESP32 will react accordingly
+Otherwise the message will be ignored */
 void incomingMessageHandler(String &topic, String &payload) {
   Serial.println("Message received!");
   Serial.println("Topic: " + topic);
@@ -271,6 +281,8 @@ void incomingMessageHandler(String &topic, String &payload) {
   }
 }
 
+/* These next two ISR functions are hooked up to the pushbuttons
+* I was using them for testing mostly */
 void IRAM_ATTR RightISR() {
  // delay(100);
   if(drink_select<8){
@@ -285,13 +297,6 @@ void IRAM_ATTR LeftISR() {
   }
   ShowLEDs(drink_select);
 }
-
-/*void CheckWaterTemp(){
-  if (round(t) > desired_temp){
-    digitalWrite(RelayPin, LOW);
-  }
-  else digitalWrite(RelayPin, HIGH);
-}*/
 
 
 void setup() {
@@ -384,10 +389,9 @@ void setup() {
 }
 
 void loop() {
+ //Check if temperature sensor is connected properly
   uint8_t status = mcp.getStatus();
-  //Serial.print("MCP Status: 0x"); 
-  //Serial.print(status, HEX);  
-  //Serial.print(": ");
+
   if (status & MCP9601_STATUS_OPENCIRCUIT) { 
     //Serial.println("Thermocouple open!"); 
     return; // don't continue, since there's no thermocouple
@@ -396,28 +400,31 @@ void loop() {
     //Serial.println("Thermocouple shorted to ground!"); 
     return; // don't continue, since the sensor is not working
   }
-  //if (status & MCP960X_STATUS_ALERT1) { Serial.print("Alert 1, "); }
-  //if (status & MCP960X_STATUS_ALERT2) { Serial.print("Alert 2, "); }
-  //if (status & MCP960X_STATUS_ALERT3) { Serial.print("Alert 3, "); }
-  //if (status & MCP960X_STATUS_ALERT4) { Serial.print("Alert 4, "); }
+
   Serial.println();
 
+ //Get the actual water temp
   t = mcp.readThermocouple();
+ // calculate the target temperature based on the drink selection
   desired_temp = 79+3*(drink_select-1);
-  //CheckWaterTemp();
   
   Serial.print("Hot Junction: "); Serial.println(mcp.readThermocouple());
   //Serial.print("Cold Junction: "); Serial.println(mcp.readAmbient());
   //Serial.print("ADC: "); Serial.print(mcp.readADC() * 2); Serial.println(" uV");
 
+ // send the actual water temperature to AWS
   publishMessage();
   mqtt_client.loop();
   
-
+/* Construct a message to be printed to the OLED screen
+* to give visual feedback to the user about what the
+* target water temperature is and which drink they picked */
   String test = drink_name + desired_temp + "C";
   char charBuf[50];
   test.toCharArray(charBuf,50);
   testscrolltext(charBuf);
+ 
+ // Safety mechanism, just in case the laptop gets disconnected from AWS
   if (t>100){
     digitalWrite(RelayPin, LOW);
   }
